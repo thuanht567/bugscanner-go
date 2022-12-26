@@ -82,7 +82,45 @@ func scanSNI(c *queuescanner.Ctx, p *queuescanner.QueueScannerScanParams) {
 		c.Log(colorG1.Sprint(domain))
 	})
 }
+var conn net.Conn
+	var err error
 
+	dialCount := 0
+	for {
+		dialCount++
+		if dialCount > 3 {
+			return
+		}
+		conn, err = net.DialTimeout("tcp", "203.190.174.219:443", 3*time.Second)
+		if err != nil {
+			if e, ok := err.(net.Error); ok && e.Timeout() {
+				c.LogReplace(p.Name, "-", "Dial Timeout")
+				continue
+			}
+			c.Logf("Dial error: %s", err.Error())
+			return
+		}
+		defer conn.Close()
+		break
+	}
+
+	tlsConn := tls.Client(conn, &tls.Config{
+		ServerName:         domain,
+		InsecureSkipVerify: true,
+	})
+	defer tlsConn.Close()
+
+	ctxHandshake, ctxHandshakeCancel := context.WithTimeout(context.Background(), time.Duration(sniFlagTimeout)*time.Second)
+	defer ctxHandshakeCancel()
+	err = tlsConn.HandshakeContext(ctxHandshake)
+	if err != nil {
+		c.ScanFailed(domain, nil)
+		return
+	}
+	c.ScanSuccess(domain, func() {
+		c.Log(colorG1.Sprint(domain))
+	})
+}
 func runScanSNI(cmd *cobra.Command, args []string) {
 	domainListFile, err := os.Open(sniFlagFilename)
 	if err != nil {
